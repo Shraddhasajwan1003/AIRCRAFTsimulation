@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>JADO — Joint All-Domain Operations Simulation System</title>
+  <meta name="description" content="Offline aircraft war simulation with A* pathfinding, DQN reinforcement learning, and physics-based electronic warfare modeling.">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<!-- ════════════════════════════════════════════════════════════
+     TOP STATUS BAR
+═════════════════════════════════════════════════════════════ -->
+<header id="status-bar">
+  <div class="status-logo">
+    <span class="logo-icon">✈</span>
+    <span class="logo-text">JADO SIM</span>
+    <span class="logo-sub">v1.0</span>
+  </div>
+
+  <div class="status-center">
+    <div class="status-badge" id="sim-status-badge">● STANDBY</div>
+    <div class="status-mission" id="mission-name-display">JOINT ALL-DOMAIN OPERATIONS — CONSTRUCTIVE SIMULATION</div>
+  </div>
+
+  <div class="status-right">
+    <div class="status-item">
+      <span class="status-label">THREATS</span>
+      <span class="status-value" id="threat-count">0</span>
+    </div>
+    <div class="status-item">
+      <span class="status-label">AGENTS</span>
+      <span class="status-value" id="agent-count">0</span>
+    </div>
+    <div class="status-item">
+      <span class="status-label">CLOCK</span>
+      <span class="status-value" id="mission-clock">00:00:00</span>
+    </div>
+    <div class="status-item">
+      <span class="status-label">TICK</span>
+      <span class="status-value" id="tick-counter">0</span>
+    </div>
+  </div>
+</header>
+
+<!-- ════════════════════════════════════════════════════════════
+     MAIN 3-COLUMN LAYOUT
+═════════════════════════════════════════════════════════════ -->
+<main id="main-layout">
+
+  <!-- ─── LEFT PANEL: Mission Setup ───────────────────────────── -->
+  <aside id="left-panel">
+    <div class="panel-header">
+      <span class="panel-title">MISSION SETUP</span>
+      <span class="panel-indicator"></span>
+    </div>
+
+    <!-- TERRAIN -->
+    <div class="panel-section">
+      <div class="section-title">TERRAIN INPUT</div>
+      <div id="terrain-dropzone" class="dropzone">
+        <div class="dropzone-icon">⛰</div>
+        <div class="dropzone-text">DROP .OBJ / .STL FILE<br><small>or</small></div>
+        <button class="btn-secondary" onclick="JADO.UI.loadTerrainFile()">📁 Browse File</button>
+        <input type="file" id="terrain-file-input" accept=".obj,.stl" style="display:none">
+      </div>
+      <button class="btn-primary full-width" onclick="JADO.UI.generateProceduralTerrain()">
+        ⊕ Generate Procedural Terrain
+      </button>
+      <div class="param-row">
+        <label>Resolution</label>
+        <select id="terrain-resolution">
+          <option value="100">100m (Fast)</option>
+          <option value="50" selected>50m (Medium)</option>
+          <option value="25">25m (High)</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- FRIENDLY AIRCRAFT -->
+    <div class="panel-section">
+      <div class="section-title">FRIENDLY AIRCRAFT</div>
+      <div class="param-row">
+        <label>Type</label>
+        <select id="friendly-type">
+          <option value="F16C">F-16C Falcon</option>
+          <option value="F22A">F-22A Raptor</option>
+          <option value="EA18G">EA-18G Growler (EW)</option>
+          <option value="B2A">B-2A Spirit</option>
+        </select>
+      </div>
+      <button class="btn-friendly full-width" id="btn-place-friendly"
+              onclick="JADO.UI.startPlaceFriendly()">
+        ✈ Place Aircraft (Click Map)
+      </button>
+      <div id="friendly-list" class="unit-list"></div>
+    </div>
+
+    <!-- ENEMY THREATS -->
+    <div class="panel-section">
+      <div class="section-title">ENEMY THREATS</div>
+      <div class="param-row">
+        <label>Type</label>
+        <select id="threat-type">
+          <option value="SA10">SA-10 Grumble (S-300)</option>
+          <option value="SA20">SA-20 Gargoyle (S-400)</option>
+          <option value="SHORADS">SA-15 Tor-M1 (SHORAD)</option>
+          <option value="RADAR">EW Radar (Early Warning)</option>
+          <option value="MIG31">MiG-31 Foxhound</option>
+        </select>
+      </div>
+      <button class="btn-danger full-width" id="btn-place-threat"
+              onclick="JADO.UI.startPlaceThreat()">
+        ⚠ Place Threat (Click Map)
+      </button>
+      <div id="threat-list" class="unit-list"></div>
+    </div>
+
+    <!-- OBSTACLES -->
+    <div class="panel-section">
+      <div class="section-title">OBSTACLES / TERRAIN BLOCKS</div>
+      <div class="param-row">
+        <label>Type</label>
+        <select id="obstacle-type">
+          <option value="mountain">Mountain Ridge</option>
+          <option value="building">Urban Structure</option>
+          <option value="cliff">Rock Cliff</option>
+          <option value="custom">Custom Block</option>
+        </select>
+      </div>
+      <div class="param-row">
+        <label>Size (×100m)</label>
+        <input type="range" id="obstacle-size" min="1" max="10" value="3">
+        <span id="obstacle-size-label">3</span>
+      </div>
+      <button class="btn-secondary full-width" onclick="JADO.UI.startPlaceObstacle()">
+        ⬛ Place Obstacle (Click Map)
+      </button>
+    </div>
+
+    <!-- ENVIRONMENT -->
+    <div class="panel-section">
+      <div class="section-title">ENVIRONMENT CONDITIONS</div>
+      <div class="param-row">
+        <label>Weather</label>
+        <select id="weather-type" onchange="JADO.UI.applyWeather()">
+          <option value="clear">Clear (100% radar)</option>
+          <option value="overcast">Overcast (90%)</option>
+          <option value="rain">Heavy Rain (75%)</option>
+          <option value="storm">Storm (60%)</option>
+        </select>
+      </div>
+      <div class="param-row">
+        <label>Wind (m/s)</label>
+        <input type="number" id="wind-speed" value="0" min="0" max="80">
+      </div>
+      <div class="param-row">
+        <label>ECM Noise</label>
+        <input type="range" id="ecm-density" min="0" max="100" value="0">
+        <span id="ecm-label">0%</span>
+      </div>
+    </div>
+
+    <!-- TARGET -->
+    <div class="panel-section">
+      <div class="section-title">MISSION TARGET</div>
+      <button class="btn-warning full-width" onclick="JADO.UI.startPlaceTarget()">
+        ◎ Set Target (Click Map)
+      </button>
+      <div class="param-row" id="target-coords-display" style="color:#ffaa00; font-size:10px">
+        Not set
+      </div>
+    </div>
+
+    <!-- PATH PLANNING -->
+    <div class="panel-section">
+      <div class="section-title">A* PATH PLANNING</div>
+      <button class="btn-primary full-width" id="btn-compute-paths"
+              onclick="JADO.UI.computePaths()">
+        🗺 Compute Safe Corridors
+      </button>
+      <div class="corridor-toggles">
+        <label class="corridor-toggle fastest">
+          <input type="checkbox" id="show-fastest" checked
+                 onchange="JADO.UI.toggleCorridor('fastest', this.checked)">
+          <span>⚡ Fastest</span>
+        </label>
+        <label class="corridor-toggle lowalt">
+          <input type="checkbox" id="show-lowalt" checked
+                 onchange="JADO.UI.toggleCorridor('lowAlt', this.checked)">
+          <span>↓ Low-Alt</span>
+        </label>
+        <label class="corridor-toggle balanced">
+          <input type="checkbox" id="show-balanced" checked
+                 onchange="JADO.UI.toggleCorridor('balanced', this.checked)">
+          <span>⚖ Balanced</span>
+        </label>
+      </div>
+    </div>
+
+  </aside>
+
+  <!-- ─── CENTER: 3D Theater Map ────────────────────────────── -->
+  <section id="theater-section">
+    <div id="canvas-container">
+
+      <canvas id="theater-canvas"></canvas>
+
+      <!-- HUD overlays -->
+      <div id="map-hud">
+        <div class="hud-item" id="hud-coords">XYZ: — — —</div>
+        <div class="hud-item" id="hud-grid">🗜 ORBIT | SCROLL=ZOOM | R=RESET</div>
+        <div class="hud-compass"><div class="compass-rose">N</div></div>
+      </div>
+
+      <!-- Placement mode banner -->
+      <div id="placement-banner" class="hidden">
+        <span id="placement-text">Click on terrain to place</span>
+        <button onclick="JADO.UI.cancelPlacement()">✕ Cancel [ESC]</button>
+      </div>
+
+      <!-- RL training indicator -->
+      <div id="rl-indicator" class="hidden">
+        <div class="rl-pulse"></div>
+        <span>RL TRAINING</span>
+        <span id="rl-epsilon">ε: 1.000</span>
+        <span id="rl-episodes">Ep: 0</span>
+      </div>
+    </div>
+
+    <!-- Map control buttons -->
+    <div id="map-controls">
+      <button class="map-btn" title="Reset Camera"    onclick="JADO.Renderer.resetCamera()">⌂</button>
+      <button class="map-btn" title="Top-Down View"   onclick="JADO.Renderer.topView()">⊕</button>
+      <button class="map-btn" title="Toggle Grid"     onclick="JADO.UI.toggleGrid()">⊞</button>
+      <button class="map-btn" title="Save Screenshot" onclick="JADO.UI.screenshot()">📷</button>
+    </div>
+  </section>
+
+  <!-- ─── RIGHT PANEL: Telemetry ───────────────────────────── -->
+  <aside id="right-panel">
+    <div class="panel-header">
+      <span class="panel-title">TELEMETRY</span>
+      <span class="panel-indicator pulse"></span>
+    </div>
+
+    <!-- Agent Status -->
+    <div class="panel-section">
+      <div class="section-title">AGENT STATUS</div>
+      <div id="agent-cards"></div>
+    </div>
+
+    <!-- Kill Probability -->
+    <div class="panel-section">
+      <div class="section-title">KILL PROBABILITY (Pk%)</div>
+      <div id="pk-gauges"></div>
+    </div>
+
+    <!-- Charts -->
+    <div class="panel-section">
+      <div class="section-title">ALTITUDE (m) — Agent 1</div>
+      <canvas id="altitude-chart" width="230" height="70"></canvas>
+    </div>
+    <div class="panel-section">
+      <div class="section-title">SPEED (m/s)</div>
+      <canvas id="speed-chart" width="230" height="70"></canvas>
+    </div>
+    <div class="panel-section">
+      <div class="section-title">THREAT Pk%</div>
+      <canvas id="threat-chart" width="230" height="70"></canvas>
+    </div>
+
+    <!-- RL Stats -->
+    <div class="panel-section">
+      <div class="section-title">DQN-RL TRAINING</div>
+      <div class="stat-row"><span>Episodes</span><span id="rl-ep-count">0</span></div>
+      <div class="stat-row"><span>Epsilon (ε)</span><span id="rl-eps-val">1.000</span></div>
+      <div class="stat-row"><span>Avg Reward</span><span id="rl-avg-reward">0.00</span></div>
+      <div class="stat-row"><span>Memory</span><span id="rl-memory-size">0 / 5000</span></div>
+      <div class="stat-row"><span>Train Steps</span><span id="rl-train-steps">0</span></div>
+    </div>
+
+    <!-- Log -->
+    <div class="panel-section" style="flex:1">
+      <div class="section-title">SITREP LOG</div>
+      <div id="sim-log" class="log-container"></div>
+    </div>
+
+  </aside>
+</main>
+
+<!-- ════════════════════════════════════════════════════════════
+     BOTTOM CONTROL BAR
+═════════════════════════════════════════════════════════════ -->
+<footer id="control-bar">
+
+  <!-- Sim controls -->
+  <div class="control-group">
+    <button class="ctrl-btn play"  id="btn-run"   onclick="JADO.Sim.start()">▶ RUN</button>
+    <button class="ctrl-btn pause" id="btn-pause" onclick="JADO.Sim.pause()" disabled>⏸ PAUSE</button>
+    <button class="ctrl-btn reset" id="btn-reset" onclick="JADO.Sim.reset()">↺ RESET</button>
+  </div>
+
+  <!-- Speed -->
+  <div class="control-group">
+    <span class="ctrl-label">SPEED</span>
+    <button class="speed-btn active" id="spd-1x"  onclick="JADO.Sim.setSpeed(1)">1×</button>
+    <button class="speed-btn"        id="spd-2x"  onclick="JADO.Sim.setSpeed(2)">2×</button>
+    <button class="speed-btn"        id="spd-5x"  onclick="JADO.Sim.setSpeed(5)">5×</button>
+    <button class="speed-btn"        id="spd-10x" onclick="JADO.Sim.setSpeed(10)">10×</button>
+  </div>
+
+  <!-- View toggles -->
+  <div class="control-group">
+    <span class="ctrl-label">VIEW</span>
+    <label class="toggle-label">
+      <input type="checkbox" checked
+             onchange="JADO.Renderer.toggleThreatZones(this.checked)">
+      <span>Threat Zones</span>
+    </label>
+    <label class="toggle-label">
+      <input type="checkbox" checked
+             onchange="JADO.Renderer.toggleCorridors(this.checked)">
+      <span>Corridors</span>
+    </label>
+    <label class="toggle-label">
+      <input type="checkbox" checked
+             onchange="JADO.Renderer.toggleTrails(this.checked)">
+      <span>Flight Trails</span>
+    </label>
+  </div>
+
+  <!-- Mission actions -->
+  <div class="control-group">
+    <button class="ctrl-btn export" onclick="JADO.UI.exportAAR()">📥 Export AAR</button>
+    <button class="ctrl-btn clear"  onclick="JADO.UI.clearMission()">🗑 Clear All</button>
+  </div>
+
+  <!-- Quick-add shortcuts -->
+  <div class="control-group" style="margin-left:auto">
+    <span class="ctrl-label" style="color:#6090b0; font-size:9px">SPACE=Play/Pause | ESC=Cancel</span>
+  </div>
+
+</footer>
+
+<!-- ════════════════════════════════════════════════════════════
+     SCRIPTS — Load order matters (dependencies first)
+═════════════════════════════════════════════════════════════ -->
+
+<!-- External libraries (downloaded once by setup.bat) -->
+<script src="lib/three.min.js"></script>
+<script src="lib/OrbitControls.js"></script>
+<script src="lib/OBJLoader.js"></script>
+<script src="lib/STLLoader.js"></script>
+<script src="lib/tf.min.js"></script>
+
+<!-- JADO modules in dependency order -->
+<script src="js/data/UnitSpecs.js"></script>
+<script src="js/data/TelemetryCache.js"></script>
+<script src="js/terrain/VoxelGrid.js"></script>
+<script src="js/terrain/TerrainGenerator.js"></script>
+<script src="js/terrain/TerrainLoader.js"></script>
+<script src="js/pathfinding/AStar3D.js"></script>
+<script src="js/ew/EWModel.js"></script>
+<script src="js/rl/DQNAgent.js"></script>
+<script src="js/rl/RLEnvironment.js"></script>
+<script src="js/simulation/Agent.js"></script>
+<script src="js/simulation/SimController.js"></script>
+<script src="js/renderer/Renderer3D.js"></script>
+<script src="js/ui/TelemetryPanel.js"></script>
+<script src="js/ui/UIManager.js"></script>
+<script src="js/app.js"></script>
+
+</body>
+</html>
