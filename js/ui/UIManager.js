@@ -52,10 +52,63 @@
       JADO.state.terrainData = data;
       JADO.state.grid        = data.grid;
       JADO.Renderer.loadTerrain(data);
-      JADO.log(`Terrain loaded: ${data.dimX}×${data.dimZ}×${data.dimY} voxels (${data.voxelSize}m each)`, 'info');
-
-      // Update EW model weather
       JADO.EW.setWeather(this._weatherSpec);
+
+      const g = data.geoInfo || {};
+      const voxels = `${data.dimX}×${data.dimZ}×${data.dimY}`;
+      JADO.log(`Terrain loaded: ${voxels} voxels (${data.voxelSize}m)`, 'info');
+
+      if (g.hasGeoRef) {
+        if (g.lat != null && g.lon != null)
+          JADO.log(`  🌐 Centre: ${g.lat.toFixed(5)}°N, ${g.lon.toFixed(5)}°E`, 'info');
+        if (g.minLat != null)
+          JADO.log(`  Bounds: ${g.minLat.toFixed(4)}°N–${g.maxLat.toFixed(4)}°N  ${g.minLon.toFixed(4)}°E–${g.maxLon.toFixed(4)}°E`, 'info');
+        JADO.log(`  Elevation: ${g.elevMin}m – ${g.elevMax}m  (Δ${g.altRange}m)`, 'info');
+        if (g.crs)    JADO.log(`  CRS: ${g.crs}`, 'info');
+        if (g.source) JADO.log(`  Source: ${g.source}`, 'info');
+      }
+
+      this._showTerrainInfo(g, data);
+    }
+
+    _showTerrainInfo(g, data) {
+      const el = document.getElementById('terrain-info-box');
+      if (!el) return;
+
+      if (!g || !g.hasGeoRef) {
+        el.innerHTML = `<div class="ti-row"><span>Size</span><span>${data.dimX}×${data.dimZ} voxels</span></div>
+          <div class="ti-row"><span>Voxel</span><span>${data.voxelSize} m</span></div>
+          <div class="ti-row"><span>Max Alt</span><span>${Math.round(data.maxHeight)} m</span></div>`;
+        el.classList.remove('hidden');
+        return;
+      }
+
+      let html = '';
+      if (g.lat != null && g.lon != null) {
+        html += `<div class="ti-row geo"><span>🌐 LAT</span><span>${g.lat.toFixed(5)}°N</span></div>`;
+        html += `<div class="ti-row geo"><span>🌐 LON</span><span>${g.lon.toFixed(5)}°E</span></div>`;
+      }
+      if (g.minLat != null) {
+        html += `<div class="ti-row"><span>N Bound</span><span>${g.minLat.toFixed(4)}° – ${g.maxLat.toFixed(4)}°</span></div>`;
+        html += `<div class="ti-row"><span>E Bound</span><span>${g.minLon.toFixed(4)}° – ${g.maxLon.toFixed(4)}°</span></div>`;
+      }
+      if (g.elevMin != null) {
+        html += `<div class="ti-row"><span>Elev Min</span><span>${g.elevMin} m</span></div>`;
+        html += `<div class="ti-row"><span>Elev Max</span><span>${g.elevMax} m</span></div>`;
+        html += `<div class="ti-row"><span>Δ Alt</span><span>${g.altRange} m</span></div>`;
+      }
+      if (g.crs)    html += `<div class="ti-row"><span>CRS</span><span>${g.crs}</span></div>`;
+      if (g.source) html += `<div class="ti-row"><span>Source</span><span style="font-size:8px">${g.source.slice(0,30)}</span></div>`;
+      html += `<div class="ti-row"><span>Conv.</span><span>${g.convention || 'Y_UP'}</span></div>`;
+      html += `<div class="ti-row"><span>Voxel</span><span>${data.voxelSize} m</span></div>`;
+
+      el.innerHTML = html;
+      el.classList.remove('hidden');
+
+      // Also update HUD if geo-ref
+      if (JADO.Renderer && g.lat != null) {
+        JADO.Renderer.setGeoHUD(g);
+      }
     }
 
     // ── Friendly aircraft placement ───────────────────────────────
@@ -96,11 +149,14 @@
         };
         JADO.state.threats.push(threat);
         JADO.Renderer.addThreat(threat);
+        
+        const radiusM = spec.radius || 50000;
+
         if (JADO.state.cache) {
           JADO.state.cache.addThreatZone(
             JADO.state.missionId, threat.id,
             threat.x, 0, threat.z,
-            spec.radius || 50000, spec.type
+            radiusM, spec.type
           );
         }
         this._addUnitListItem('threat-list', threat.id, spec.name, () => {
@@ -130,6 +186,7 @@
           const vc = JADO.state.grid.worldToVoxel(pos.x, pos.y, pos.z);
           const halfV = Math.ceil(size / 2);
           JADO.state.grid.setBox(vc.x, vc.y, vc.z, halfV, halfV * spec.heightMult, halfV, JADO.VoxelGrid.TYPE.OBSTACLE);
+          JADO.state.grid.inflateZone(JADO.VoxelGrid.TYPE.OBSTACLE, 3); // 3-voxel safety margin for obstacles
         }
         JADO.Renderer.addObstacle(pos, sizeM, parseInt(spec.color.replace('#',''), 16));
         JADO.log(`Placed ${spec.name} obstacle at (${Math.round(pos.x)}, ${Math.round(pos.z)})`, 'info');
@@ -156,6 +213,19 @@
       });
     }
 
+    // ── Clear target ──────────────────────────────────────────────
+
+    clearTarget() {
+      if (JADO.state._targetMarker) {
+        JADO.Renderer._scene.remove(JADO.state._targetMarker);
+        JADO.state._targetMarker = null;
+      }
+      JADO.state.targetPos = null;
+      document.getElementById('target-coords-display').textContent = 'Not set';
+      JADO.log('Mission target cleared', 'info');
+      this.toast('Target cleared', 'info');
+    }
+
     // ── Path planning ─────────────────────────────────────────────
 
     computePaths() {
@@ -167,7 +237,6 @@
       const btn = document.getElementById('btn-compute-paths');
       if (btn) btn.disabled = true;
 
-      // Run after short delay for UI to update
       setTimeout(() => {
         try {
           const startPos = JADO.state.agents[0].getPos();
@@ -190,6 +259,8 @@
             Object.entries(corridors).forEach(([type, path]) => {
               if (path) JADO.log(`  ${type}: ${path.length} waypoints`, 'info');
             });
+            // Show corridor stats in right panel
+            this._showCorridorStats(JADO.state.corridorStats);
           }
         } catch(e) {
           this.toast('Pathfinding error: ' + e.message, 'error');
@@ -199,6 +270,32 @@
       }, 100);
     }
 
+    // ── Corridor stats display ────────────────────────────────────
+
+    _showCorridorStats(stats) {
+      const container = document.getElementById('path-stats-content');
+      if (!container || !stats) return;
+
+      const corColors = { shortest: '#00ff88', safest: '#ffdd00', balanced: '#00ccff', fastest: '#00ff88', lowAlt: '#ffdd00' };
+      const corLabels = { shortest: '⚡ Shortest', safest: '🛡️ Safest', balanced: '⚖ Balanced', fastest: '⚡ Fastest', lowAlt: '↓ Low-Alt' };
+
+      container.innerHTML = Object.entries(stats).map(([type, s]) => {
+        if (!s) return `<div class="path-stat-block" style="border-left:2px solid #333">
+          <div class="path-stat-title" style="color:#304060">${corLabels[type] || type} — NO PATH</div>
+        </div>`;
+        return `<div class="path-stat-block" style="border-left:2px solid ${corColors[type] || '#444'}">
+          <div class="path-stat-title" style="color:${corColors[type] || '#aaa'}">${corLabels[type] || type}</div>
+          <div class="path-stat-row"><span>Length</span><span>${s.lengthKm} km</span></div>
+          <div class="path-stat-row"><span>Waypoints</span><span>${s.waypoints}</span></div>
+          <div class="path-stat-row"><span>Min Alt</span><span>${s.minAlt} m</span></div>
+          <div class="path-stat-row"><span>Max Alt</span><span>${s.maxAlt} m</span></div>
+          <div class="path-stat-row"><span>Avg Alt</span><span>${s.avgAlt} m</span></div>
+          <div class="path-stat-row"><span>Computed</span><span>${s.computeMs} ms</span></div>
+        </div>`;
+      }).join('');
+    }
+
+
     // ── Corridor visibility toggles ───────────────────────────────
 
     toggleCorridor(type, show) { JADO.Renderer.toggleCorridor(type, show); }
@@ -207,7 +304,11 @@
 
     toggleGrid() { JADO.Renderer.toggleGrid(); }
 
-    toggleVoxels() { this.toast('Voxel overlay: feature coming soon', 'info'); }
+    toggleVoxels() {
+      this._voxelsVisible = !this._voxelsVisible;
+      JADO.Renderer.toggleVoxels(this._voxelsVisible);
+      this.toast(`Voxel view ${this._voxelsVisible ? 'enabled' : 'disabled'}`, 'info');
+    }
 
     // ── Cancel placement ──────────────────────────────────────────
 
@@ -323,17 +424,54 @@
         document.getElementById('tick-counter').textContent = data.tick;
       }
 
-      // Update RL stats in right panel
+      // Update RL training stats
       if (JADO.state.dqnAgent) {
         const s = JADO.state.dqnAgent.getStats();
         const set = (id, v) => { const el = document.getElementById(id); if(el) el.textContent = v; };
         set('rl-ep-count',    s.episodes);
         set('rl-eps-val',     s.epsilon);
         set('rl-avg-reward',  s.avgReward);
-        set('rl-memory-size', s.memory);
+        set('rl-memory-size', `${s.memory} / 5000`);
         set('rl-train-steps', s.trainSteps);
         set('rl-epsilon',     'ε: ' + s.epsilon);
         set('rl-episodes',    'Ep: ' + s.episodes);
+        set('rl-states-seen', s.memory);
+      }
+
+      // Update live RL agent position panel (primary agent)
+      const primaryAgent = JADO.state.agents.find(a => a.alive);
+      if (primaryAgent) {
+        const set = (id, v) => { const el = document.getElementById(id); if(el) el.textContent = v; };
+        
+        // Add geographical lat/lon string if georef is loaded
+        let latStr = '—', lonStr = '—';
+        if (JADO.state.terrainData && JADO.state.terrainData.geoRef) {
+          const ll = JADO.Renderer._worldToLatLon(primaryAgent.x, primaryAgent.z);
+          latStr = ll.lat.toFixed(5) + '°N';
+          lonStr = ll.lon.toFixed(5) + '°E';
+        }
+        
+        set('rl-pos-x',       Math.round(primaryAgent.x) + ' m');
+        set('rl-pos-y',       Math.round(primaryAgent.altitude) + ' m');
+        set('rl-pos-z',       Math.round(primaryAgent.z) + ' m');
+        
+        // If there's an element for lat/lon, update it
+        set('rl-pos-lat', latStr);
+        set('rl-pos-lon', lonStr);
+        
+        set('rl-heading',     Math.round(primaryAgent.heading) + '°');
+        set('rl-corridor-type', primaryAgent.corridorType || '—');
+        set('rl-wp-idx',      primaryAgent.corridorWaypointIdx || '—');
+        set('rl-wp-total',    primaryAgent.corridor ? primaryAgent.corridor.length : '—');
+        set('rl-deviation',   Math.round(primaryAgent.corridorDeviation || 0) + ' m');
+        // Progress: waypoint index / total waypoints
+        const progress = primaryAgent.corridor && primaryAgent.corridor.length > 0
+          ? ((primaryAgent.corridorWaypointIdx / (primaryAgent.corridor.length - 1)) * 100).toFixed(1) + '%'
+          : '—';
+        set('rl-progress',    progress);
+        set('rl-ticks-alive', primaryAgent.ticksAlive || '0');
+        const secAlive = ((primaryAgent.ticksAlive || 0) / 10).toFixed(1);
+        set('rl-time-alive',  secAlive + ' s');
       }
     }
 

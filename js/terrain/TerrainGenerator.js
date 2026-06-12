@@ -102,7 +102,7 @@
       const VoxelGrid = window.JADO.VoxelGrid;
       const grid = new VoxelGrid(dimX, dimY, dimZ, voxelSize);
       grid.applyHeightmap(heights);
-      grid.inflate(1); // 1 voxel safety margin
+      grid.computeDistanceField(); // 4-layer distance gradient
 
       // Build Three.js mesh
       const mesh = this._buildMesh(dimX, dimZ, voxelSize, heights, maxHeight);

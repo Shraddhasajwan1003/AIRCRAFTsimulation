@@ -61,9 +61,9 @@
       <div class="section-title">TERRAIN INPUT</div>
       <div id="terrain-dropzone" class="dropzone">
         <div class="dropzone-icon">⛰</div>
-        <div class="dropzone-text">DROP .OBJ / .STL FILE<br><small>or</small></div>
+        <div class="dropzone-text">DROP .OBJ / .STL / .TIF FILE<br><small>or</small></div>
         <button class="btn-secondary" onclick="JADO.UI.loadTerrainFile()">📁 Browse File</button>
-        <input type="file" id="terrain-file-input" accept=".obj,.stl" style="display:none">
+        <input type="file" id="terrain-file-input" accept=".obj,.stl,.tif,.tiff" style="display:none">
       </div>
       <button class="btn-primary full-width" onclick="JADO.UI.generateProceduralTerrain()">
         ⊕ Generate Procedural Terrain
@@ -71,11 +71,14 @@
       <div class="param-row">
         <label>Resolution</label>
         <select id="terrain-resolution">
-          <option value="100">100m (Fast)</option>
-          <option value="50" selected>50m (Medium)</option>
-          <option value="25">25m (High)</option>
+          <option value="100">100m (Draft)</option>
+          <option value="50">50m (Fast)</option>
+          <option value="25" selected>25m (Medium)</option>
+          <option value="10">10m (High)</option>
         </select>
       </div>
+      <!-- Terrain geo-info panel (shown after OBJ/STL load) -->
+      <div id="terrain-info-box" class="hidden" style="margin-top:6px"></div>
     </div>
 
     <!-- FRIENDLY AIRCRAFT -->
@@ -165,9 +168,15 @@
     <!-- TARGET -->
     <div class="panel-section">
       <div class="section-title">MISSION TARGET</div>
-      <button class="btn-warning full-width" onclick="JADO.UI.startPlaceTarget()">
-        ◎ Set Target (Click Map)
-      </button>
+      <div style="display:flex;gap:4px;margin-bottom:6px">
+        <button class="btn-warning" style="flex:1" onclick="JADO.UI.startPlaceTarget()">
+          ◎ Set Target
+        </button>
+        <button class="btn-danger" style="flex:0 0 60px" id="btn-clear-target"
+                onclick="JADO.UI.clearTarget()" title="Remove current target">
+          ✕ Clear
+        </button>
+      </div>
       <div class="param-row" id="target-coords-display" style="color:#ffaa00; font-size:10px">
         Not set
       </div>
@@ -182,14 +191,14 @@
       </button>
       <div class="corridor-toggles">
         <label class="corridor-toggle fastest">
-          <input type="checkbox" id="show-fastest" checked
-                 onchange="JADO.UI.toggleCorridor('fastest', this.checked)">
-          <span>⚡ Fastest</span>
+          <input type="checkbox" id="show-shortest" checked
+                 onchange="JADO.UI.toggleCorridor('shortest', this.checked)">
+          <span>⚡ Shortest</span>
         </label>
         <label class="corridor-toggle lowalt">
-          <input type="checkbox" id="show-lowalt" checked
-                 onchange="JADO.UI.toggleCorridor('lowAlt', this.checked)">
-          <span>↓ Low-Alt</span>
+          <input type="checkbox" id="show-safest" checked
+                 onchange="JADO.UI.toggleCorridor('safest', this.checked)">
+          <span>🛡️ Safest</span>
         </label>
         <label class="corridor-toggle balanced">
           <input type="checkbox" id="show-balanced" checked
@@ -210,7 +219,8 @@
       <!-- HUD overlays -->
       <div id="map-hud">
         <div class="hud-item" id="hud-coords">XYZ: — — —</div>
-        <div class="hud-item" id="hud-grid">🗜 ORBIT | SCROLL=ZOOM | R=RESET</div>
+        <div class="hud-item hidden" id="hud-geo">🌐 —</div>
+        <div class="hud-item" id="hud-grid">🗴 ORBIT | SCROLL=ZOOM | R=RESET</div>
         <div class="hud-compass"><div class="compass-rose">N</div></div>
       </div>
 
@@ -234,6 +244,7 @@
       <button class="map-btn" title="Reset Camera"    onclick="JADO.Renderer.resetCamera()">⌂</button>
       <button class="map-btn" title="Top-Down View"   onclick="JADO.Renderer.topView()">⊕</button>
       <button class="map-btn" title="Toggle Grid"     onclick="JADO.UI.toggleGrid()">⊞</button>
+      <button class="map-btn" title="Toggle Voxels"   onclick="JADO.UI.toggleVoxels()">🧱</button>
       <button class="map-btn" title="Save Screenshot" onclick="JADO.UI.screenshot()">📷</button>
     </div>
   </section>
@@ -271,14 +282,44 @@
       <canvas id="threat-chart" width="230" height="70"></canvas>
     </div>
 
-    <!-- RL Stats -->
+    <!-- RL Stats + Path Intelligence -->
     <div class="panel-section">
       <div class="section-title">DQN-RL TRAINING</div>
       <div class="stat-row"><span>Episodes</span><span id="rl-ep-count">0</span></div>
       <div class="stat-row"><span>Epsilon (ε)</span><span id="rl-eps-val">1.000</span></div>
       <div class="stat-row"><span>Avg Reward</span><span id="rl-avg-reward">0.00</span></div>
-      <div class="stat-row"><span>Memory</span><span id="rl-memory-size">0 / 5000</span></div>
+      <div class="stat-row"><span>Memory</span><span id="rl-memory-size">0</span></div>
       <div class="stat-row"><span>Train Steps</span><span id="rl-train-steps">0</span></div>
+      <div class="stat-row"><span>Cur Reward/tick</span><span id="rl-cur-reward">—</span></div>
+      <div class="stat-row"><span>States Seen</span><span id="rl-states-seen">0</span></div>
+    </div>
+
+    <!-- A* Path Intelligence -->
+    <div class="panel-section" id="path-stats-panel">
+      <div class="section-title">A* PATH INTELLIGENCE</div>
+      <div id="path-stats-content">
+        <div style="color:#304060;font-size:10px;text-align:center;padding:6px">Run "Compute Corridors" to see path data</div>
+      </div>
+    </div>
+
+    <!-- RL Waypoint Trail -->
+    <div class="panel-section">
+      <div class="section-title">RL AGENT POSITION (LIVE)</div>
+      <div id="rl-pos-panel">
+        <div class="stat-row"><span>X</span><span id="rl-pos-x">—</span></div>
+        <div class="stat-row"><span>Y (Alt)</span><span id="rl-pos-y">—</span></div>
+        <div class="stat-row"><span>Z</span><span id="rl-pos-z">—</span></div>
+        <div class="stat-row" style="color:#00ff88; font-weight:bold;"><span>LAT</span><span id="rl-pos-lat">—</span></div>
+        <div class="stat-row" style="color:#00ff88; font-weight:bold;"><span>LON</span><span id="rl-pos-lon">—</span></div>
+        <div class="stat-row"><span>Heading</span><span id="rl-heading">—</span></div>
+        <div class="stat-row"><span>Corridor</span><span id="rl-corridor-type">—</span></div>
+        <div class="stat-row"><span>WP Index</span><span id="rl-wp-idx">—</span></div>
+        <div class="stat-row"><span>WP Total</span><span id="rl-wp-total">—</span></div>
+        <div class="stat-row"><span>Deviation</span><span id="rl-deviation">—</span></div>
+        <div class="stat-row"><span>Progress</span><span id="rl-progress">—</span></div>
+        <div class="stat-row"><span>Ticks Alive</span><span id="rl-ticks-alive">—</span></div>
+        <div class="stat-row"><span>Time Alive</span><span id="rl-time-alive">—</span></div>
+      </div>
     </div>
 
     <!-- Log -->
@@ -354,6 +395,7 @@
 <script src="lib/OBJLoader.js"></script>
 <script src="lib/STLLoader.js"></script>
 <script src="lib/tf.min.js"></script>
+<script src="lib/geotiff.js"></script>
 
 <!-- JADO modules in dependency order -->
 <script src="js/data/UnitSpecs.js"></script>

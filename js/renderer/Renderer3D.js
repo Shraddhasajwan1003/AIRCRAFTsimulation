@@ -128,39 +128,209 @@
 
     // ── Terrain loading ───────────────────────────────────────────
 
-    loadTerrain(terrainData) {
-      // Remove old terrain
+    _clearTerrainObjects() {
+      // Remove by reference
       if (this._terrainMesh) {
         this._scene.remove(this._terrainMesh);
-        this._terrainMesh.geometry.dispose();
+        if (this._terrainMesh.geometry) this._terrainMesh.geometry.dispose();
+        if (this._terrainMesh.material) this._terrainMesh.material.dispose();
+        this._terrainMesh = null;
       }
-      this._terrainMesh = terrainData.mesh;
-      this._scene.add(this._terrainMesh);
+      if (this._terrainPlane) {
+        this._scene.remove(this._terrainPlane);
+        this._terrainPlane = null;
+      }
+      // Sweep scene for any leftover terrain/wireframe/voxel objects by name
+      const toRemove = [];
+      this._scene.traverse(obj => {
+        if (obj.name === 'terrain_wire' || obj.name === 'terrain' || obj.name === 'terrain_plane' || obj.name === 'voxel_mesh') {
+          toRemove.push(obj);
+        }
+      });
+      toRemove.forEach(obj => {
+        this._scene.remove(obj);
+        if (obj.geometry) obj.geometry.dispose();
+        if (obj.material) obj.material.dispose();
+      });
+    }
 
-      // Add wireframe overlay
-      const wireGeo = this._terrainMesh.geometry.clone();
-      const wireMat = new THREE.MeshBasicMaterial({ color: 0x003322, wireframe: true, transparent: true, opacity: 0.08 });
+    loadTerrain(terrainData) {
+      // ── Purge ALL old terrain objects from scene ──────────────────
+      this._clearTerrainObjects();
+
+      // ── Add new terrain mesh ──────────────────────────────────────
+      const mesh = terrainData.mesh;
+      // Ensure TIF PlaneGeometry meshes (centered at origin) are shifted
+      // so the terrain spans [0..worldSizeX] × [0..worldSizeZ]
+      if (!mesh.position.x && !mesh.position.z) {
+        mesh.position.set(terrainData.worldSizeX / 2, 0, terrainData.worldSizeZ / 2);
+      }
+      mesh.name = 'terrain';
+      this._terrainMesh = mesh;
+      if (this._showVoxels) mesh.visible = false;
+      this._scene.add(mesh);
+
+      // ── Subtle wireframe overlay (military grid look) ─────────────
+      const wireGeo = mesh.geometry.clone();
+      const wireMat = new THREE.MeshBasicMaterial({
+        color: 0x00ff88, wireframe: true,
+        transparent: true, opacity: 0.04,
+        depthWrite: false,
+      });
       const wire = new THREE.Mesh(wireGeo, wireMat);
-      wire.position.copy(this._terrainMesh.position);
+      wire.position.copy(mesh.position);
       wire.name = 'terrain_wire';
+      this._terrainWire = wire; // Store reference for toggling
+      if (this._showVoxels) wire.visible = false;
       this._scene.add(wire);
 
-      // Create invisible plane for raycasting (placement)
+      // ── Build Minecraft-style Voxel Grid (Hidden by default) ──────
+      if (terrainData.grid) {
+        this.renderVoxelGrid(terrainData);
+      }
+
+      // ── Invisible flat plane for fallback raycasting ─────────────
       const ps = Math.max(terrainData.worldSizeX, terrainData.worldSizeZ);
       this._terrainPlane = new THREE.Mesh(
-        new THREE.PlaneGeometry(ps * 2, ps * 2),
+        new THREE.PlaneGeometry(ps * 3, ps * 3),
         new THREE.MeshBasicMaterial({ visible: false, side: THREE.DoubleSide })
       );
       this._terrainPlane.rotation.x = -Math.PI / 2;
       this._terrainPlane.position.set(terrainData.worldSizeX / 2, 0, terrainData.worldSizeZ / 2);
+      this._terrainPlane.name = 'terrain_plane';
       this._scene.add(this._terrainPlane);
 
-      // Reposition camera
+      // ── Store geographic reference for lat/lon conversion ─────────
+      this._geoRef = terrainData.geoRef || null;
+
+      // ── Reposition camera ─────────────────────────────────────────
       const cx = terrainData.worldSizeX / 2;
       const cz = terrainData.worldSizeZ / 2;
-      this._camera.position.set(cx, terrainData.maxHeight * 3, cz - terrainData.worldSizeZ * 0.7);
+      const camH = Math.max(terrainData.maxHeight * 3.5, 2000);
+      this._camera.position.set(cx, camH, cz - terrainData.worldSizeZ * 0.65);
+      this._camera.lookAt(cx, 0, cz);
       this._controls.target.set(cx, 0, cz);
+      this._controls.update();
       this._gridHelper.position.set(cx, 0, cz);
+    }
+
+    // ── Voxel (Minecraft) Rendering ───────────────────────────────
+
+    renderVoxelGrid(terrainData) {
+      const grid = terrainData.grid;
+      if (this._voxelMesh) {
+        this._scene.remove(this._voxelMesh);
+        this._voxelMesh.geometry.dispose();
+        this._voxelMesh.material.dispose();
+        this._voxelMesh = null;
+      }
+
+      console.log('[Renderer3D] Building Voxel Mesh...');
+      const TYPE = JADO.VoxelGrid.TYPE;
+      const vs = grid.voxelSize;
+      
+      // Calculate real-world elevation scaling
+      const geoInfo = terrainData.geoInfo || null;
+      let elevMin = 0;
+      let displayAltScale = 1;
+      if (geoInfo && geoInfo.hasGeoRef) {
+        elevMin = geoInfo.elevMin;
+        displayAltScale = terrainData.maxHeight / Math.max(1, geoInfo.altRange);
+      }
+
+      // 1. Count surface voxels to size the InstancedMesh
+      let count = 0;
+      const surfaceVoxels = []; // array of {x, y, z, type}
+      const isSurface = (vx, vy, vz) => {
+        // A voxel is surface if any of its 6 neighbors is FREE
+        const n = [
+          [1,0,0], [-1,0,0], [0,1,0], [0,-1,0], [0,0,1], [0,0,-1]
+        ];
+        for (const [dx, dy, dz] of n) {
+          const nx = vx+dx, ny = vy+dy, nz = vz+dz;
+          if (!grid.inBounds(nx, ny, nz) || grid.data[grid._idx(nx, ny, nz)] === TYPE.FREE) {
+            return true;
+          }
+        }
+        return false;
+      };
+
+      for (let x = 0; x < grid.dimX; x++) {
+        for (let y = 0; y < grid.dimY; y++) {
+          for (let z = 0; z < grid.dimZ; z++) {
+            const t = grid.data[grid._idx(x, y, z)];
+            if (t !== TYPE.FREE && t !== TYPE.THREAT_ZONE) {
+              if (isSurface(x, y, z)) {
+                surfaceVoxels.push({ x, y, z, type: t });
+                count++;
+              }
+            }
+          }
+        }
+      }
+
+      console.log(`[Renderer3D] Voxel surface count: ${count}`);
+      if (count === 0) return;
+
+      // 2. Create InstancedMesh
+      const geo = new THREE.BoxGeometry(vs, vs, vs);
+      const mat = new THREE.MeshBasicMaterial({
+        color: 0xffffff,
+        vertexColors: true,
+        transparent: true,
+        opacity: 0.85,      // Slightly translucent blanket look
+      });
+      const mesh = new THREE.InstancedMesh(geo, mat, count);
+      mesh.name = 'voxel_mesh';
+      mesh.visible = this._showVoxels || false; // Default hidden
+
+      const dummy = new THREE.Object3D();
+      const color = new THREE.Color();
+      const colorArray = new Float32Array(count * 3);
+
+      for (let i = 0; i < count; i++) {
+        const v = surfaceVoxels[i];
+        
+        // Position
+        dummy.position.set(
+          (v.x + 0.5) * vs,
+          (v.y + 0.5) * vs,
+          (v.z + 0.5) * vs
+        );
+        dummy.updateMatrix();
+        mesh.setMatrixAt(i, dummy.matrix);
+
+        // Color based on type and height
+        if (v.type === TYPE.TERRAIN) {
+          // Pure bright green gradient based on height for maximum visibility
+          const hRatio = Math.min(1, Math.max(0, v.y / grid.dimY));
+          // HSL: Hue 0.33 (Green), Saturation 1.0 (Max), Lightness from 0.25 to 0.75
+          color.setHSL(0.33, 1.0, 0.25 + hRatio * 0.5);
+        }
+        else if (v.type === TYPE.OBSTACLE) color.setHex(0x111111); // Black for obstacles
+        else if (v.type === TYPE.MARGIN_1) color.setHex(0xff0000); // Red
+        else if (v.type === TYPE.MARGIN_2) color.setHex(0xff6600); // Orange
+        else if (v.type === TYPE.MARGIN_3) color.setHex(0xffff00); // Yellow
+        else if (v.type === TYPE.MARGIN_4) color.setHex(0x00ffff); // Cyan/Light Blue
+        else color.setHex(0xffffff);
+
+        colorArray[i*3]   = color.r;
+        colorArray[i*3+1] = color.g;
+        colorArray[i*3+2] = color.b;
+      }
+
+      mesh.instanceColor = new THREE.InstancedBufferAttribute(colorArray, 3);
+      mesh.instanceMatrix.needsUpdate = true;
+      this._voxelMesh = mesh;
+      this._scene.add(mesh);
+    }
+
+    toggleVoxels(show) {
+      this._showVoxels = show;
+      if (this._voxelMesh) this._voxelMesh.visible = show;
+      // Hide smooth mesh when voxels are on
+      if (this._terrainMesh) this._terrainMesh.visible = !show;
+      if (this._terrainWire) this._terrainWire.visible = !show;
     }
 
     // ── Agent rendering ───────────────────────────────────────────
@@ -311,7 +481,7 @@
       const ringGeo = new THREE.RingGeometry(radius * 0.95, radius, 64);
       const ringMat = new THREE.MeshBasicMaterial({
         color: 0xff3300, transparent: true, opacity: 0.12,
-        side: THREE.DoubleSide, depthWrite: false,
+        side: THREE.DoubleSide, depthWrite: false, depthTest: false
       });
       const ring = new THREE.Mesh(ringGeo, ringMat);
       ring.rotation.x = -Math.PI / 2;
@@ -332,34 +502,122 @@
     // ── Corridor rendering ────────────────────────────────────────
 
     setCorridors(corridors) {
-      // Remove old
-      Object.values(this._corridorLines).forEach(l => { if (l) this._scene.remove(l); });
+      // Remove ALL old corridor objects (lines + dots + labels)
+      if (this._corridorGroup) {
+        this._scene.remove(this._corridorGroup);
+        this._corridorGroup.traverse(obj => {
+          if (obj.geometry) obj.geometry.dispose();
+          if (obj.material) {
+            if (Array.isArray(obj.material)) obj.material.forEach(m => m.dispose());
+            else obj.material.dispose();
+          }
+        });
+      }
+      this._corridorGroup = new THREE.Group();
+      this._corridorGroup.name = 'corridors';
+      this._scene.add(this._corridorGroup);
 
-      const colors = { fastest: 0x00ff88, lowAlt: 0xffdd00, balanced: 0x00ccff };
+      // Reset line refs
+      this._corridorLines = { shortest: null, balanced: null, safest: null,
+                               fastest: null, lowAlt: null }; // legacy compat
+
+      const colors = {
+        shortest: 0x00ff88,   // green  — shortest distance
+        balanced: 0x00ccff,   // cyan   — balanced
+        safest:   0xffdd00,   // yellow — safest / low-alt
+        // legacy names
+        fastest:  0x00ff88,
+        lowAlt:   0xffdd00,
+      };
+
+      const labels = {
+        shortest: 'SHORTEST', balanced: 'BALANCED', safest: 'SAFEST',
+        fastest:  'SHORTEST', lowAlt:   'SAFEST',
+      };
+
       for (const [type, path] of Object.entries(corridors)) {
         if (!path || path.length < 2) continue;
-        const pts = path.map(p => new THREE.Vector3(p.x, p.y + 50, p.z));
+        const col = colors[type] || 0xffffff;
+
+        // Lift path slightly above terrain
+        const pts = path.map(p => new THREE.Vector3(p.x, p.y + 60, p.z));
+
+        // Draw tube-style corridor line
         const geo = new THREE.BufferGeometry().setFromPoints(pts);
         const mat = new THREE.LineBasicMaterial({
-          color: colors[type] || 0xffffff,
-          linewidth: 2,
-          transparent: true, opacity: 0.8,
+          color: col, transparent: true, opacity: 0.85, depthTest: false
         });
         const line = new THREE.Line(geo, mat);
         line.visible = this._showCorridors;
-        this._scene.add(line);
+        this._corridorGroup.add(line);
         this._corridorLines[type] = line;
 
-        // Add waypoint markers
-        for (let i = 0; i < pts.length; i += Math.max(1, Math.floor(pts.length/20))) {
-          const dotGeo = new THREE.SphereGeometry(40, 8, 8);
-          const dotMat = new THREE.MeshBasicMaterial({ color: colors[type] || 0xffffff });
+        // Waypoint spheres + lat/lon labels (every ~8 waypoints)
+        const step = Math.max(1, Math.floor(pts.length / 8));
+        for (let i = 0; i < pts.length; i += step) {
+          const isFirst = (i === 0);
+          const isLast  = (i >= pts.length - step);
+
+          // Sphere
+          const r = (isFirst || isLast) ? 70 : 40;
+          const dotGeo = new THREE.SphereGeometry(r, 8, 8);
+          const dotMat = new THREE.MeshBasicMaterial({ color: col, depthTest: false });
           const dot = new THREE.Mesh(dotGeo, dotMat);
           dot.position.copy(pts[i]);
           dot.visible = this._showCorridors;
-          this._scene.add(dot);
+          this._corridorGroup.add(dot);
+
+          // Lat/lon label if geo-reference is available
+          if (this._geoRef) {
+            const ll = this._worldToLatLon(path[i].x, path[i].z);
+            const labelText = `${ll.lat.toFixed(4)}°N\n${ll.lon.toFixed(4)}°E`;
+            const sprite = this._makeTextSprite(labelText, col);
+            sprite.position.set(pts[i].x, pts[i].y + 180, pts[i].z);
+            sprite.visible = this._showCorridors;
+            this._corridorGroup.add(sprite);
+          }
         }
+
+        // Corridor type label at start
+        const startLabel = this._makeTextSprite(labels[type] || type.toUpperCase(), col);
+        startLabel.position.set(pts[0].x, pts[0].y + 320, pts[0].z);
+        startLabel.visible = this._showCorridors;
+        this._corridorGroup.add(startLabel);
       }
+    }
+
+    // Convert world X/Z to geographic lat/lon using stored geoRef
+    _worldToLatLon(wx, wz) {
+      if (!this._geoRef) return { lat: 0, lon: 0 };
+      const { originLat, originLon, mPerLat, mPerLon } = this._geoRef;
+      return {
+        lat: originLat + wz / mPerLat,
+        lon: originLon + wx / mPerLon,
+      };
+    }
+
+    // Create a canvas-based text sprite for 3D labels
+    _makeTextSprite(text, color = 0x00ff88) {
+      const lines = text.split('\n');
+      const W = 340, H = lines.length > 1 ? 90 : 54;
+      const canvas = document.createElement('canvas');
+      canvas.width = W; canvas.height = H;
+      const ctx = canvas.getContext('2d');
+      const hex = '#' + color.toString(16).padStart(6, '0');
+      ctx.fillStyle = 'rgba(0,0,0,0.55)';
+      ctx.fillRect(0, 0, W, H);
+      ctx.strokeStyle = hex;
+      ctx.lineWidth = 2;
+      ctx.strokeRect(1, 1, W-2, H-2);
+      ctx.fillStyle = hex;
+      ctx.font = 'bold 22px Consolas, monospace';
+      ctx.textAlign = 'center';
+      lines.forEach((l, i) => ctx.fillText(l, W/2, 28 + i * 28));
+      const tex = new THREE.CanvasTexture(canvas);
+      const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false });
+      const sprite = new THREE.Sprite(mat);
+      sprite.scale.set(W * 1.8, H * 1.8, 1);
+      return sprite;
     }
 
     toggleCorridor(type, show) {
@@ -432,6 +690,19 @@
       this._controls.target.set(2500, 0, 2500);
     }
 
+    // Show geo-info in the HUD lat/lon panel
+    setGeoHUD(geoInfo) {
+      const el = document.getElementById('hud-geo');
+      if (!el) return;
+      const lat = geoInfo.lat != null ? geoInfo.lat.toFixed(4) + '°N' : '—';
+      const lon = geoInfo.lon != null ? geoInfo.lon.toFixed(4) + '°E' : '—';
+      const elev = geoInfo.elevMin != null
+        ? `${geoInfo.elevMin}–${geoInfo.elevMax}m`
+        : (geoInfo.altRange ? `Δ${geoInfo.altRange}m` : '');
+      el.textContent = `🌐 ${lat}  ${lon}${elev ? '  ▲' + elev : ''}`;
+      el.classList.remove('hidden');
+    }
+
     // ── Placement mode ────────────────────────────────────────────
 
     startPlacement(mode, callback) {
@@ -449,21 +720,37 @@
     _onClick(event) {
       if (!this._placementMode || !this._placementCB) return;
 
-      const rect = this.canvas.getBoundingClientRect();
+      // Prevent orbit controls from also firing
+      event.stopPropagation();
+
+      const rect = this._renderer.domElement.getBoundingClientRect();
       this._mouse.x = ((event.clientX - rect.left) / rect.width)  *  2 - 1;
       this._mouse.y = ((event.clientY - rect.top)  / rect.height) * -2 + 1;
 
       this._raycaster.setFromCamera(this._mouse, this._camera);
 
-      const targets = this._terrainMesh ? [this._terrainMesh, this._terrainPlane].filter(Boolean) : [];
-      const intersects = this._raycaster.intersectObjects(targets, false);
+      // Priority 1: raycast against actual terrain mesh (accurate heights)
+      if (this._terrainMesh) {
+        const hits = this._raycaster.intersectObject(this._terrainMesh, false);
+        if (hits.length > 0) {
+          const pt = hits[0].point;
+          this._placementCB({ x: pt.x, y: pt.y, z: pt.z });
+          this.cancelPlacement();
+          return;
+        }
+      }
 
-      if (intersects.length > 0) {
-        const pt = intersects[0].point;
-        this._placementCB({ x: pt.x, y: pt.y, z: pt.z });
-        this.cancelPlacement();
+      // Priority 2: fallback to flat plane (handles edge/water areas)
+      if (this._terrainPlane) {
+        const hits = this._raycaster.intersectObject(this._terrainPlane, false);
+        if (hits.length > 0) {
+          const pt = hits[0].point;
+          this._placementCB({ x: pt.x, y: 0, z: pt.z });
+          this.cancelPlacement();
+        }
       }
     }
+
 
     _onMouseMove(event) {
       const rect = this.canvas.getBoundingClientRect();

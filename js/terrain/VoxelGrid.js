@@ -4,8 +4,14 @@
   'use strict';
   window.JADO = window.JADO || {};
 
-  // Voxel types
-  const TYPE = { FREE: 0, TERRAIN: 1, OBSTACLE: 2, THREAT_ZONE: 3 };
+  // Voxel types (0-3 are solid/core, 10+ are distance field margins)
+  const TYPE = { 
+    FREE: 0, TERRAIN: 1, OBSTACLE: 2, THREAT_ZONE: 3,
+    MARGIN_1: 11, // 1 voxel away (very high cost)
+    MARGIN_2: 12, // 2 voxels away (high cost)
+    MARGIN_3: 13, // 3 voxels away (medium cost)
+    MARGIN_4: 14  // 4 voxels away (low cost)
+  };
 
   class VoxelGrid {
     /**
@@ -105,8 +111,9 @@
           }
     }
 
-    // Inflate all TERRAIN/OBSTACLE voxels by a margin (safety margin)
-    inflate(marginVox) {
+    // Inflate only a specific voxel type by a margin (safety margin)
+    inflateZone(targetType, marginVox) {
+      if (marginVox <= 0) return;
       const copy = new Uint8Array(this.data);
       const offsets = [];
       for (let dx = -marginVox; dx <= marginVox; dx++)
@@ -118,15 +125,73 @@
       for (let x = 0; x < this.dimX; x++)
         for (let y = 0; y < this.dimY; y++)
           for (let z = 0; z < this.dimZ; z++) {
-            if (copy[this._idx(x,y,z)] === TYPE.TERRAIN ||
-                copy[this._idx(x,y,z)] === TYPE.OBSTACLE) {
+            if (copy[this._idx(x,y,z)] === targetType) {
               for (const [dx,dy,dz] of offsets) {
                 const nx=x+dx, ny=y+dy, nz=z+dz;
                 if (this.inBounds(nx,ny,nz) && this.data[this._idx(nx,ny,nz)] === TYPE.FREE)
-                  this.data[this._idx(nx,ny,nz)] = TYPE.TERRAIN; // inflated as terrain
+                  this.data[this._idx(nx,ny,nz)] = targetType;
               }
             }
           }
+    }
+
+    // ── Distance Field / Cost Gradient ────────────────────────────
+
+    // Scans outward from all TERRAIN and OBSTACLE voxels to create concentric
+    // layers of MARGIN_X voxels. These act as a visual and pathfinding cost gradient.
+    computeDistanceField() {
+      console.log('[VoxelGrid] Computing 4-layer distance field...');
+      let currentShell = [];
+      const dims = this.dimX * this.dimY * this.dimZ;
+      
+      // Pass 0: Find all solid boundaries
+      for (let i = 0; i < dims; i++) {
+        const t = this.data[i];
+        if (t === TYPE.TERRAIN || t === TYPE.OBSTACLE) {
+          currentShell.push(i);
+        }
+      }
+
+      // 6-connected neighbor offsets (up, down, left, right, front, back)
+      const nOffs = [
+        1, -1, 
+        this.dimZ, -this.dimZ, 
+        this.dimY * this.dimZ, -this.dimY * this.dimZ
+      ];
+
+      // Pass 1-4: Propagate outward
+      const layers = [TYPE.MARGIN_1, TYPE.MARGIN_2, TYPE.MARGIN_3, TYPE.MARGIN_4];
+      
+      for (let d = 0; d < layers.length; d++) {
+        const nextShell = [];
+        const layerType = layers[d];
+        
+        for (let i = 0; i < currentShell.length; i++) {
+          const idx = currentShell[i];
+          // Recover x,y,z to check bounds
+          const z = idx % this.dimZ;
+          const y = Math.floor(idx / this.dimZ) % this.dimY;
+          const x = Math.floor(idx / (this.dimY * this.dimZ));
+
+          for (const off of nOffs) {
+            const nIdx = idx + off;
+            // Strict bounds check via coordinates to prevent wrap-around
+            if (off === 1 && z === this.dimZ - 1) continue;
+            if (off === -1 && z === 0) continue;
+            if (off === this.dimZ && y === this.dimY - 1) continue;
+            if (off === -this.dimZ && y === 0) continue;
+            if (off === this.dimY * this.dimZ && x === this.dimX - 1) continue;
+            if (off === -this.dimY * this.dimZ && x === 0) continue;
+
+            if (this.data[nIdx] === TYPE.FREE) {
+              this.data[nIdx] = layerType;
+              nextShell.push(nIdx);
+            }
+          }
+        }
+        currentShell = nextShell;
+      }
+      console.log('[VoxelGrid] Distance field complete.');
     }
 
     // ── Surface height query ──────────────────────────────────────

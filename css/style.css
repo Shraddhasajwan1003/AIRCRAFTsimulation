@@ -309,6 +309,22 @@ button { cursor: pointer; font-family: var(--font-mono); font-size: 11px; }
 
 .full-width { width: 100%; margin-bottom: 6px; text-align: center; }
 
+/* ── Terrain Info Box (geo-metadata after import) ── */
+#terrain-info-box {
+  background: rgba(0, 10, 25, 0.7);
+  border: 1px solid var(--border-primary);
+  border-radius: 3px; padding: 5px 8px;
+}
+.ti-row {
+  display: flex; justify-content: space-between;
+  font-size: 10px; padding: 2px 0;
+  border-bottom: 1px solid rgba(0,255,204,0.04);
+  color: var(--text-secondary);
+}
+.ti-row span:last-child { color: var(--text-primary); }
+.ti-row.geo span:first-child { color: var(--color-warning); }
+.ti-row.geo span:last-child  { color: var(--color-warning); text-shadow: 0 0 5px rgba(255,170,0,0.4); }
+
 /* ── Dropzone ── */
 .dropzone {
   border: 2px dashed var(--border-primary);
@@ -510,6 +526,22 @@ canvas#altitude-chart, canvas#speed-chart, canvas#threat-chart {
 }
 .stat-row span:first-child { color: var(--text-secondary); }
 .stat-row span:last-child { color: var(--color-primary); }
+
+/* ── A* Path Intelligence blocks ── */
+.path-stat-block {
+  padding: 5px 8px; margin-bottom: 5px; border-radius: 2px;
+  background: rgba(0,5,15,0.5);
+}
+.path-stat-title {
+  font-size: 10px; letter-spacing: 1px; font-weight: bold;
+  margin-bottom: 3px;
+}
+.path-stat-row {
+  display: flex; justify-content: space-between;
+  font-size: 9px; padding: 1px 0;
+  color: var(--text-secondary);
+}
+.path-stat-row span:last-child { color: var(--text-primary); }
 
 /* ── Simulation Log ── */
 .log-container {
