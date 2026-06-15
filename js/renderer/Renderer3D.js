@@ -272,13 +272,10 @@
       console.log(`[Renderer3D] Voxel surface count: ${count}`);
       if (count === 0) return;
 
-      // 2. Create InstancedMesh
-      const geo = new THREE.BoxGeometry(vs, vs, vs);
-      const mat = new THREE.MeshBasicMaterial({
-        color: 0xffffff,
-        vertexColors: true,
-        transparent: true,
-        opacity: 0.85,      // Slightly translucent blanket look
+      // 2. Create InstancedMesh (Using Lambert for shadow shading and slightly scaled geometry for gaps)
+      const geo = new THREE.BoxGeometry(vs * 0.96, vs * 0.96, vs * 0.96);
+      const mat = new THREE.MeshLambertMaterial({
+        color: 0x999999, // Lower base color so top faces aren't washed out by the intense sun
       });
       const mesh = new THREE.InstancedMesh(geo, mat, count);
       mesh.name = 'voxel_mesh';
@@ -302,10 +299,18 @@
 
         // Color based on type and height
         if (v.type === TYPE.TERRAIN) {
-          // Pure bright green gradient based on height for maximum visibility
-          const hRatio = Math.min(1, Math.max(0, v.y / grid.dimY));
-          // HSL: Hue 0.33 (Green), Saturation 1.0 (Max), Lightness from 0.25 to 0.75
-          color.setHSL(0.33, 1.0, 0.25 + hRatio * 0.5);
+          // Calculate actual TIF elevation for this voxel
+          const worldY = v.y * vs;
+          const realElev = (worldY / displayAltScale) + elevMin;
+          
+          // Allot specific colors to specific elevation bands (Real-world meters)
+          if (realElev < 100) color.setHex(0x1a5225);      // Deep Green
+          else if (realElev < 400) color.setHex(0x367a31); // Forest Green
+          else if (realElev < 800) color.setHex(0x8a9942); // Olive / Foothills
+          else if (realElev < 1400) color.setHex(0xb88e39);// Golden Brown
+          else if (realElev < 2200) color.setHex(0xa65728);// High Brown
+          else if (realElev < 3000) color.setHex(0x5e4537);// Dark Rock
+          else color.setHex(0xffffff);                     // Snow Peaks
         }
         else if (v.type === TYPE.OBSTACLE) color.setHex(0x111111); // Black for obstacles
         else if (v.type === TYPE.MARGIN_1) color.setHex(0xff0000); // Red
@@ -314,12 +319,10 @@
         else if (v.type === TYPE.MARGIN_4) color.setHex(0x00ffff); // Cyan/Light Blue
         else color.setHex(0xffffff);
 
-        colorArray[i*3]   = color.r;
-        colorArray[i*3+1] = color.g;
-        colorArray[i*3+2] = color.b;
+        mesh.setColorAt(i, color);
       }
 
-      mesh.instanceColor = new THREE.InstancedBufferAttribute(colorArray, 3);
+      if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
       mesh.instanceMatrix.needsUpdate = true;
       this._voxelMesh = mesh;
       this._scene.add(mesh);
@@ -756,17 +759,43 @@
       const rect = this.canvas.getBoundingClientRect();
       const mx = ((event.clientX - rect.left) / rect.width)  *  2 - 1;
       const my = ((event.clientY - rect.top)  / rect.height) * -2 + 1;
-      // Update HUD coords via raycasting
+      
+      const tooltip = document.getElementById('cursor-tooltip');
+      
       if (this._terrainMesh) {
+        // Temporarily force visible to allow raycasting, even in voxel mode
+        const wasVis = this._terrainMesh.visible;
+        this._terrainMesh.visible = true;
+        
         const rc = new THREE.Raycaster();
         rc.setFromCamera({ x: mx, y: my }, this._camera);
-        const hits = rc.intersectObject(this._terrainMesh);
+        const hits = rc.intersectObject(this._terrainMesh, false);
+        
+        this._terrainMesh.visible = wasVis;
+        
         if (hits.length > 0) {
           const p = hits[0].point;
-          const el = document.getElementById('hud-coords');
-          if (el) el.textContent = `XYZ: ${Math.round(p.x)}, ${Math.round(p.y)}, ${Math.round(p.z)}`;
+          let html = `<b>XYZ:</b> ${Math.round(p.x)}, ${Math.round(p.y)}, ${Math.round(p.z)}<br>`;
+          html += `<b>Elev:</b> ${Math.round(p.y)} m<br>`;
+          
+          if (window.JADO && JADO.state && JADO.state.terrainData && JADO.state.terrainData.geoRef) {
+             const ref = JADO.state.terrainData.geoRef;
+             const lon = ref.originLon + (p.x / ref.mPerLon);
+             const lat = ref.originLat + (p.z / ref.mPerLat);
+             html += `<b>Lat:</b> ${lat.toFixed(5)}°<br>`;
+             html += `<b>Lon:</b> ${lon.toFixed(5)}°`;
+          }
+          
+          if (tooltip) {
+             tooltip.innerHTML = html;
+             tooltip.style.left = (event.clientX + 15) + 'px';
+             tooltip.style.top = (event.clientY + 15) + 'px';
+             tooltip.style.display = 'block';
+          }
+          return;
         }
       }
+      if (tooltip) tooltip.style.display = 'none';
     }
 
     _onResize() {

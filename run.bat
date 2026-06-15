@@ -1,4 +1,4 @@
-@echo off
+  @echo off
 title JADO Simulation Launcher
 color 0A
 
@@ -13,3 +13,4 @@ if not exist "lib\three.min.js" (
 
 echo  Launching JADO Aircraft War Simulation...
 start "" "%~dp0index.html"
+  
