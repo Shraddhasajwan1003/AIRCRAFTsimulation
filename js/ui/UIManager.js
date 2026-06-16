@@ -69,6 +69,97 @@
       }
 
       this._showTerrainInfo(g, data);
+
+      // Unhide the "Save to Database" button now that a map is loaded
+      const saveBtn = document.getElementById('btn-save-map');
+      if (saveBtn) saveBtn.classList.remove('hidden');
+    }
+
+    // ── Local Database ─────────────────────────────────────────────
+
+    async saveCurrentMap() {
+      if (!JADO.state.terrainData || !JADO.state.terrainData.heights) {
+        return this.toast('No map loaded to save.', 'error');
+      }
+      this.toast('Saving map to database... This may take a few seconds.', 'info');
+      
+      // Delay slightly to let toast render
+      setTimeout(async () => {
+        try {
+          const id = await JADO.MapDB.saveMap(JADO.state.terrainData);
+          this.toast('Map successfully saved to database!', 'success');
+          JADO.log(`Map Saved to DB: ${id}`, 'info');
+          this.refreshMapDatabaseList();
+        } catch(e) {
+          this.toast('Error saving map: ' + e.message, 'error');
+          console.error(e);
+        }
+      }, 100);
+    }
+
+    async refreshMapDatabaseList() {
+      if (!JADO.MapDB) return;
+      try {
+        const maps = await JADO.MapDB.getAllMapHeaders();
+        const select = document.getElementById('db-map-list');
+        if (!select) return;
+        
+        select.innerHTML = '';
+        if (maps.length === 0) {
+          select.innerHTML = '<option value="">No maps saved</option>';
+          return;
+        }
+        
+        maps.forEach(m => {
+          const opt = document.createElement('option');
+          opt.value = m.id;
+          opt.textContent = m.name;
+          select.appendChild(opt);
+        });
+      } catch(e) {
+        console.error('Error refreshing map DB list', e);
+      }
+    }
+
+    async loadSelectedMap() {
+      const select = document.getElementById('db-map-list');
+      if (!select || !select.value) return this.toast('No map selected', 'error');
+      
+      this.toast('Loading map from database...', 'info');
+      try {
+        const mapData = await JADO.MapDB.getMapById(select.value);
+        if (!mapData) throw new Error('Map data not found in DB');
+        
+        const reconstructed = await JADO.TerrainLoader.loadFromDatabaseData(mapData);
+        this._applyTerrain(reconstructed);
+        this.toast('Map loaded instantly from database', 'success');
+        JADO.log(`Map Loaded from DB: ${mapData.name}`, 'info');
+        
+      } catch(e) {
+        this.toast('Error loading map: ' + e.message, 'error');
+        console.error(e);
+      }
+    }
+
+    async loadMapByCoords() {
+      const lat = parseFloat(document.getElementById('db-search-lat').value);
+      const lon = parseFloat(document.getElementById('db-search-lon').value);
+      
+      if (isNaN(lat) || isNaN(lon)) return this.toast('Please enter valid Lat/Lon coordinates', 'error');
+      
+      this.toast(`Searching database for Lat: ${lat}, Lon: ${lon}...`, 'info');
+      try {
+        const mapData = await JADO.MapDB.findMapByLatLon(lat, lon);
+        if (!mapData) return this.toast('No offline map found for these coordinates', 'error');
+        
+        const reconstructed = await JADO.TerrainLoader.loadFromDatabaseData(mapData);
+        this._applyTerrain(reconstructed);
+        this.toast('Map found and loaded from database', 'success');
+        JADO.log(`Map Loaded by Coords from DB: ${mapData.name}`, 'info');
+      } catch(e) {
+        this.toast('Error searching database: ' + e.message, 'error');
+        console.error(e);
+      }
     }
 
     _showTerrainInfo(g, data) {

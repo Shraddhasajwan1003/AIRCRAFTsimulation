@@ -200,6 +200,72 @@
       this._terrainPlane.name = 'terrain_plane';
       this._scene.add(this._terrainPlane);
 
+      // ── XYZ Axis Helper & Geographic Labels ─────────────
+      if (this._axisGroup) {
+        this._scene.remove(this._axisGroup);
+        if (this._axisLabels) {
+          this._axisLabels.forEach(l => { if (l.el.parentNode) l.el.parentNode.removeChild(l.el); });
+        }
+      }
+      
+      this._axisGroup = new THREE.Group();
+      this._axisGroup.name = 'axis_helper';
+      
+      const geoInfo = terrainData.geoInfo;
+      const wsX = terrainData.worldSizeX;
+      const wsZ = terrainData.worldSizeZ;
+      const mH = terrainData.maxHeight;
+      
+      // Draw 3 thick lines (X=Red, Y=Green, Z=Blue)
+      const matX = new THREE.LineBasicMaterial({ color: 0xff4444, linewidth: 2 });
+      const matY = new THREE.LineBasicMaterial({ color: 0x44ff44, linewidth: 2 });
+      const matZ = new THREE.LineBasicMaterial({ color: 0x4444ff, linewidth: 2 });
+      
+      const drawLine = (p1, p2, mat) => {
+        const geo = new THREE.BufferGeometry().setFromPoints([p1, p2]);
+        this._axisGroup.add(new THREE.Line(geo, mat));
+      };
+      
+      // Extend lines slightly past the map bounds for visibility
+      const pad = Math.max(wsX, wsZ) * 0.05;
+      drawLine(new THREE.Vector3(0,0,0), new THREE.Vector3(wsX + pad, 0, 0), matX);
+      drawLine(new THREE.Vector3(0,0,0), new THREE.Vector3(0, mH + (pad*0.5), 0), matY);
+      drawLine(new THREE.Vector3(0,0,0), new THREE.Vector3(0, 0, wsZ + pad), matZ);
+      
+      this._scene.add(this._axisGroup);
+      
+      // Setup HTML labels tracking the 3D points
+      this._axisLabels = [];
+      const createLabel = (pos, text, color) => {
+        const el = document.createElement('div');
+        el.style.position = 'absolute';
+        el.style.background = 'rgba(0,10,20,0.8)';
+        el.style.color = color;
+        el.style.border = `1px solid ${color}`;
+        el.style.padding = '4px 6px';
+        el.style.fontFamily = 'monospace';
+        el.style.fontSize = '11px';
+        el.style.pointerEvents = 'none';
+        el.style.borderRadius = '3px';
+        el.style.zIndex = '10';
+        el.innerHTML = text.replace(/\n/g, '<br>');
+        this.canvas.parentNode.appendChild(el);
+        this._axisLabels.push({ pos, el });
+      };
+      
+      let oLat = '—', oLon = '—', xLon = '—', zLat = '—';
+      if (geoInfo && geoInfo.hasGeoRef) {
+        oLat = geoInfo.minLat.toFixed(5) + '°';
+        oLon = geoInfo.minLon.toFixed(5) + '°';
+        xLon = geoInfo.maxLon.toFixed(5) + '°';
+        zLat = geoInfo.maxLat.toFixed(5) + '°';
+      }
+      
+      createLabel(new THREE.Vector3(0,0,0), `ORIGIN (0,0,0)\nLat: ${oLat}\nLon: ${oLon}`, '#ffffff');
+      createLabel(new THREE.Vector3(wsX + pad, 0, 0), `X-AXIS (East)\nLon: ${xLon}`, '#ff8888');
+      createLabel(new THREE.Vector3(0, 0, wsZ + pad), `Z-AXIS (North)\nLat: ${zLat}`, '#8888ff');
+      createLabel(new THREE.Vector3(0, mH + (pad*0.5), 0), `Y-AXIS (Up)\nElev: ${Math.round(mH)}m`, '#88ff88');
+
       // ── Store geographic reference for lat/lon conversion ─────────
       this._geoRef = terrainData.geoRef || null;
 
@@ -766,6 +832,8 @@
         // Temporarily force visible to allow raycasting, even in voxel mode
         const wasVis = this._terrainMesh.visible;
         this._terrainMesh.visible = true;
+        // CRITICAL: Ensure matrix is updated if it was hidden on the first frame
+        if (!wasVis) this._terrainMesh.updateMatrixWorld(true);
         
         const rc = new THREE.Raycaster();
         rc.setFromCamera({ x: mx, y: my }, this._camera);
@@ -819,6 +887,26 @@
 
       this._controls.update();
       this._renderer.render(this._scene, this._camera);
+      
+      // Update Axis Labels
+      if (this._axisLabels && this._axisLabels.length > 0) {
+        const rect = this.canvas.parentNode.getBoundingClientRect();
+        for (const lbl of this._axisLabels) {
+          const vec = lbl.pos.clone();
+          vec.project(this._camera);
+          
+          if (vec.z > 1) { // Behind camera
+            lbl.el.style.display = 'none';
+          } else {
+            lbl.el.style.display = 'block';
+            const x = (vec.x * 0.5 + 0.5) * rect.width;
+            const y = (vec.y * -0.5 + 0.5) * rect.height;
+            // Center label slightly
+            lbl.el.style.left = (x - 20) + 'px';
+            lbl.el.style.top = (y - 15) + 'px';
+          }
+        }
+      }
     }
 
     dispose() {

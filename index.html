@@ -79,11 +79,39 @@
       </div>
       <!-- Terrain geo-info panel (shown after OBJ/STL load) -->
       <div id="terrain-info-box" class="hidden" style="margin-top:6px"></div>
+      <button id="btn-save-map" class="btn-primary full-width hidden" onclick="JADO.UI.saveCurrentMap()" style="margin-top:6px;">
+        💾 Save Current Map to DB
+      </button>
+    </div>
+
+    <!-- MAP DATABASE -->
+    <div class="panel-section">
+      <div class="section-title">LOCAL MAP DATABASE</div>
+      <div class="param-row">
+        <label>Saved Maps</label>
+        <select id="db-map-list" style="width: 140px;">
+          <option value="">No maps saved</option>
+        </select>
+      </div>
+      <button class="btn-primary full-width" onclick="JADO.UI.loadSelectedMap()">
+        ⬇ Load Selected Map
+      </button>
+      <hr style="border:0; border-top:1px solid #0055ff; margin:10px 0;">
+      <div class="param-row">
+        <label>Search Lat</label>
+        <input type="number" id="db-search-lat" step="0.0001" style="width:70px" placeholder="28.0000">
+      </div>
+      <div class="param-row">
+        <label>Search Lon</label>
+        <input type="number" id="db-search-lon" step="0.0001" style="width:70px" placeholder="86.9000">
+      </div>
+      <button class="btn-secondary full-width" onclick="JADO.UI.loadMapByCoords()">
+        🔍 Load by Coordinates
+      </button>
     </div>
     
     <!-- Floating cursor tooltip -->
     <div id="cursor-tooltip" style="position:fixed; background:rgba(0,10,0,0.85); color:#00ff88; padding:6px 10px; font-family:monospace; font-size:12px; pointer-events:none; display:none; z-index:9999; border:1px solid #00ff88; border-radius:4px; text-shadow:0 0 5px #00ff88;"></div>
-    </div>
 
     <!-- FRIENDLY AIRCRAFT -->
     <div class="panel-section">
@@ -403,6 +431,7 @@
 
 <!-- JADO modules in dependency order -->
 <script src="js/data/UnitSpecs.js"></script>
+<script src="js/data/MapDatabase.js"></script>
 <script src="js/data/TelemetryCache.js"></script>
 <script src="js/terrain/VoxelGrid.js"></script>
 <script src="js/terrain/TerrainGenerator.js"></script>

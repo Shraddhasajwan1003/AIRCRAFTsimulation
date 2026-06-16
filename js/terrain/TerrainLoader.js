@@ -344,6 +344,29 @@
                worldSizeX: wsX, worldSizeZ: wsZ, maxHeight, geoInfo, geoRef };
     }
 
+    /**
+     * Reconstructs the 3D Terrain completely offline from a mathematically saved MapDatabase record.
+     * Bypasses the heavy TIF parser and instantly builds the voxels.
+     */
+    async loadFromDatabaseData(mapData) {
+      return new Promise((resolve) => {
+        const { dimX, dimY, dimZ, voxelSize, worldSizeX, worldSizeZ, maxHeight, heights, geoInfo, geoRef } = mapData;
+        
+        // 1. Build smooth mesh
+        const mesh = this._buildMeshFromHeights(heights, dimX, dimZ, worldSizeX, worldSizeZ, maxHeight);
+
+        // 2. Build VoxelGrid
+        const grid = new JADO.VoxelGrid(dimX, dimY, dimZ, voxelSize);
+        grid.applyHeightmap(heights);
+        grid.computeDistanceField(); // Computes 4-layer proximity gradient
+
+        resolve({
+          grid, mesh, heights, dimX, dimY, dimZ, voxelSize,
+          worldSizeX, worldSizeZ, maxHeight, geoInfo, geoRef
+        });
+      });
+    }
+
     // Build a coloured PlaneGeometry mesh from a flat heightmap
     // PlaneGeometry with (dimX-1, dimZ-1) segments has dimX*dimZ vertices.
     // After rotateX(-π/2): rows run along Z-axis, columns along X-axis.

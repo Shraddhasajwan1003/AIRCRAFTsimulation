@@ -29,6 +29,9 @@
     _targetMarker: null,
   };
 
+  // Instantiate Database
+  JADO.MapDB = new JADO.MapDatabase();
+
   // ── Global log function ───────────────────────────────────────
   window.JADO.log = function(msg, type = '') {
     const container = document.getElementById('sim-log');
