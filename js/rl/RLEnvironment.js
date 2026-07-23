@@ -120,14 +120,23 @@
         return Math.max(0, Math.min(1, 1 - remDist / Math.max(1, totalDist)));
       }
 
-      // Progress along corridor
+      // Progress along corridor using cached index
       const agentPos = { x: agent.x, y: agent.y, z: agent.z };
-      let minDist = Infinity;
-      let bestIdx = 0;
-      for (let i = 0; i < corridor.length; i++) {
+      
+      // We only search forward a few waypoints instead of the whole corridor
+      let bestIdx = agent.corridorWaypointIdx || 0;
+      let minDist = this._dist3(agentPos, corridor[bestIdx]);
+      
+      const lookahead = Math.min(corridor.length, bestIdx + 5);
+      for (let i = bestIdx + 1; i < lookahead; i++) {
         const d = this._dist3(agentPos, corridor[i]);
-        if (d < minDist) { minDist = d; bestIdx = i; }
+        if (d < minDist) { 
+          minDist = d; 
+          bestIdx = i; 
+        }
       }
+      
+      agent.corridorWaypointIdx = bestIdx;
       return bestIdx / Math.max(1, corridor.length - 1);
     }
 

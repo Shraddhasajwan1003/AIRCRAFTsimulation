@@ -13,6 +13,7 @@
   }
 
   // ── Global simulation state ───────────────────────────────────
+  window.JADO = window.JADO || {};
   window.JADO.state = {
     missionId:   'mission_' + Date.now(),
     terrainData: null,

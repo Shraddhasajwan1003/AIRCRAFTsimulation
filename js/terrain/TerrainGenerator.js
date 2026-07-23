@@ -120,9 +120,15 @@
       // Apply heights to vertices
       const pos = geometry.attributes.position;
       for (let i = 0; i < pos.count; i++) {
-        const xi = Math.floor(i % dimX);
-        const zi = Math.floor(i / dimX);
-        const h = heights[xi * dimZ + zi] || 0;
+        const col = i % dimX;
+        const row = Math.floor(i / dimX);
+        
+        // Three.js PlaneGeometry rows go in +Z after rotation,
+        // but our heightmap has row 0 at Z=0 (south), so flip row
+        const hz  = (dimZ - 1) - row;
+        const idx = col * dimZ + Math.max(0, Math.min(dimZ-1, hz));
+        
+        const h = heights[idx] || 0;
         pos.setY(i, h);
       }
       pos.needsUpdate = true;

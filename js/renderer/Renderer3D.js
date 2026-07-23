@@ -483,19 +483,30 @@
       pts.push(new THREE.Vector3(agent.x, agent.y, agent.z));
       if (pts.length > 120) pts.shift();
 
-      // Remove old line
-      const oldLine = this._trailLines.get(agent.id);
-      if (oldLine) { this._scene.remove(oldLine); oldLine.geometry.dispose(); }
+      let line = this._trailLines.get(agent.id);
+      
+      if (!line) {
+        const geo = new THREE.BufferGeometry();
+        const positions = new Float32Array(120 * 3);
+        geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        const mat = new THREE.LineBasicMaterial({
+          color: agent.faction === 'friendly' ? 0x00ff88 : 0xff4444,
+          transparent: true, opacity: 0.5,
+        });
+        line = new THREE.Line(geo, mat);
+        line.frustumCulled = false; // Prevents clipping as bounds change
+        this._scene.add(line);
+        this._trailLines.set(agent.id, line);
+      }
 
       if (pts.length < 2) return;
-      const geo = new THREE.BufferGeometry().setFromPoints(pts);
-      const mat = new THREE.LineBasicMaterial({
-        color: agent.faction === 'friendly' ? 0x00ff88 : 0xff4444,
-        transparent: true, opacity: 0.5,
-      });
-      const line = new THREE.Line(geo, mat);
-      this._scene.add(line);
-      this._trailLines.set(agent.id, line);
+      
+      const positionAttr = line.geometry.attributes.position;
+      for (let i = 0; i < pts.length; i++) {
+        positionAttr.setXYZ(i, pts[i].x, pts[i].y, pts[i].z);
+      }
+      line.geometry.setDrawRange(0, pts.length);
+      positionAttr.needsUpdate = true;
     }
 
     removeAgent(agentId) {
@@ -587,21 +598,16 @@
       this._scene.add(this._corridorGroup);
 
       // Reset line refs
-      this._corridorLines = { shortest: null, balanced: null, safest: null,
-                               fastest: null, lowAlt: null }; // legacy compat
+      this._corridorLines = { shortest: null, balanced: null, safest: null };
 
       const colors = {
         shortest: 0x00ff88,   // green  — shortest distance
         balanced: 0x00ccff,   // cyan   — balanced
         safest:   0xffdd00,   // yellow — safest / low-alt
-        // legacy names
-        fastest:  0x00ff88,
-        lowAlt:   0xffdd00,
       };
 
       const labels = {
         shortest: 'SHORTEST', balanced: 'BALANCED', safest: 'SAFEST',
-        fastest:  'SHORTEST', lowAlt:   'SAFEST',
       };
 
       for (const [type, path] of Object.entries(corridors)) {
@@ -800,7 +806,13 @@
 
       // Priority 1: raycast against actual terrain mesh (accurate heights)
       if (this._terrainMesh) {
+        const wasVis = this._terrainMesh.visible;
+        this._terrainMesh.visible = true;
+        if (!wasVis) this._terrainMesh.updateMatrixWorld(true);
+        
         const hits = this._raycaster.intersectObject(this._terrainMesh, false);
+        this._terrainMesh.visible = wasVis;
+        
         if (hits.length > 0) {
           const pt = hits[0].point;
           this._placementCB({ x: pt.x, y: pt.y, z: pt.z });

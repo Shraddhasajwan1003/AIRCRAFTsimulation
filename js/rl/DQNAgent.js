@@ -150,7 +150,9 @@
       const states     = batch.map(e => Array.from(e.state));
       const nextStates = batch.map(e => Array.from(e.nextState));
 
-      await tf.tidy(() => {
+      // Isolating synchronous tensor creation and predicting to prevent async leaks
+      let xT, yT;
+      tf.tidy(() => {
         const sTensor  = tf.tensor2d(states,     [this.batchSize, this.stateSize]);
         const nsTensor = tf.tensor2d(nextStates, [this.batchSize, this.stateSize]);
 
@@ -160,7 +162,6 @@
         const currentQData = currentQs.arraySync();
         const nextQData    = nextQs.arraySync();
 
-        const xData = states;
         const yData = currentQData.map((qRow, i) => {
           const exp = batch[i];
           const target = exp.done
@@ -171,11 +172,17 @@
           return updated;
         });
 
-        const xT = tf.tensor2d(xData, [this.batchSize, this.stateSize]);
-        const yT = tf.tensor2d(yData, [this.batchSize, this.actionSize]);
-
-        return this.model.fit(xT, yT, { epochs: 1, verbose: 0 });
+        // We create xT and yT outside the tidy cleanup scope because they are needed for the async model.fit
+        xT = tf.keep(tf.tensor2d(states, [this.batchSize, this.stateSize]));
+        yT = tf.keep(tf.tensor2d(yData, [this.batchSize, this.actionSize]));
       });
+
+      // Await fit outside of tf.tidy
+      await this.model.fit(xT, yT, { epochs: 1, verbose: 0 });
+      
+      // Manually dispose the training tensors
+      xT.dispose();
+      yT.dispose();
     }
 
     // ── Persistence (localStorage) ───────────────────────────────

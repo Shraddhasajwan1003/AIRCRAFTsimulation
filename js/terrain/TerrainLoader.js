@@ -188,7 +188,9 @@
     // ── Parsers ─────────────────────────────────────────────────────────────
 
     _parseOBJ(text) {
-      const loader = new THREE.OBJLoader();
+      const loaderClass = THREE.OBJLoader || window.OBJLoader;
+      if (!loaderClass) throw new Error('OBJLoader not found in THREE or window namespace.');
+      const loader = new loaderClass();
       const obj = loader.parse(text);
       let geo = null;
       obj.traverse(child => {
@@ -199,7 +201,9 @@
     }
 
     _parseSTL(buffer) {
-      return new THREE.STLLoader().parse(buffer);
+      const loaderClass = THREE.STLLoader || window.STLLoader;
+      if (!loaderClass) throw new Error('STLLoader not found in THREE or window namespace.');
+      return new loaderClass().parse(buffer);
     }
 
     // ── GeoTIFF / TIF loader ─────────────────────────────────────────────────

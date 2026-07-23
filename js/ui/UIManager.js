@@ -234,9 +234,13 @@
       this._showPlacementBanner(`Click map to place ${spec.name}`);
       JADO.Renderer.startPlacement('threat', (pos) => {
         this._hidePlacementBanner();
+        
+        // Find actual surface height at this position
+        const terrainH = JADO.state.terrainData.grid.surfaceHeightAt(pos.x, pos.z);
+        
         const threat = {
           id:   `THR_${specKey}_${Date.now()}`,
-          spec, x: pos.x, z: pos.z, y: 0,
+          spec, x: pos.x, z: pos.z, y: terrainH,
         };
         JADO.state.threats.push(threat);
         JADO.Renderer.addThreat(threat);
@@ -246,8 +250,9 @@
         if (JADO.state.cache) {
           JADO.state.cache.addThreatZone(
             JADO.state.missionId, threat.id,
-            threat.x, 0, threat.z,
+            threat.x, threat.y, threat.z,
             radiusM, spec.type
+
           );
         }
         this._addUnitListItem('threat-list', threat.id, spec.name, () => {
@@ -423,7 +428,15 @@
       if (!JADO.state.terrainData) { this.toast('Load terrain first', 'warn'); return; }
       if (!JADO.state.agents.length) { this.toast('Place aircraft first', 'warn'); return; }
 
-      this.applyWeather();
+      if (JADO.state.sim && !JADO.state.sim.running && JADO.state.sim.tick > 0) {
+        // Resume paused simulation
+        JADO.state.sim.start();
+        this._startClock();
+        this._setSimStatus('RUNNING');
+        document.getElementById('btn-run').disabled   = true;
+        document.getElementById('btn-pause').disabled = false;
+        return;
+      }
 
       // Build or rebuild sim controller
       const corridors = JADO.state.corridors || {};
@@ -480,9 +493,23 @@
       this._setSimStatus('STANDBY');
       document.getElementById('btn-run').disabled   = false;
       document.getElementById('btn-pause').disabled = true;
-      // Reset agent visuals
+      // Reset agent visuals and state
       JADO.state.agents.forEach(a => {
-        a.alive = true; a.currentPk = 0; a.flightPath = [];
+        if (a.startPos) {
+          a.x = a.startPos.x;
+          a.y = a.startPos.y;
+          a.z = a.startPos.z;
+        }
+        a.alive = true; 
+        a.currentPk = 0; 
+        a.flightPath = [];
+        a.ticksAlive = 0;
+        a.flares = a.spec.maxFlares || 30;
+        a.corridorWaypointIdx = 0;
+        
+        if (JADO.state.sim && JADO.state.sim.rlEnv) {
+          JADO.state.sim.rlEnv.reset(a);
+        }
         JADO.Renderer.updateAgent(a);
       });
       const rlInd = document.getElementById('rl-indicator');

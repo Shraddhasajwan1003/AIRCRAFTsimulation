@@ -120,18 +120,25 @@
       return new Promise((resolve, reject) => {
         const tx = this.db.transaction([this.storeName], 'readonly');
         const store = tx.objectStore(this.storeName);
-        const req = store.getAll();
+        const req = store.openCursor();
+        const maps = [];
+        
         req.onsuccess = (e) => {
-          // Strip out the massive binary height array for fast UI lists
-          const maps = e.target.result.map(m => ({
-            id: m.id, 
-            name: m.name, 
-            lat: m.geoInfo.lat, 
-            lon: m.geoInfo.lon,
-            timestamp: m.timestamp
-          }));
-          // Sort by newest
-          resolve(maps.sort((a, b) => b.timestamp - a.timestamp));
+          const cursor = e.target.result;
+          if (cursor) {
+            const m = cursor.value;
+            maps.push({
+              id: m.id, 
+              name: m.name, 
+              lat: m.geoInfo ? m.geoInfo.lat : 0, 
+              lon: m.geoInfo ? m.geoInfo.lon : 0,
+              timestamp: m.timestamp
+            });
+            cursor.continue();
+          } else {
+            // Done iterating
+            resolve(maps.sort((a, b) => b.timestamp - a.timestamp));
+          }
         };
         req.onerror = (e) => reject(e);
       });

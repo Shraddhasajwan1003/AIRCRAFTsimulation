@@ -97,9 +97,6 @@
         pk *= (1 - jsEff);
       }
 
-      // Stealth bonus for very low RCS
-      if (agent.spec.rcs < 0.01) pk *= 0.3;
-
       return Math.max(0, Math.min(1, pk));
     }
 
@@ -169,5 +166,5 @@
     }
   }
 
-  window.JADO.EWModel = new EWModel();
+  window.JADO.EW = new EWModel();
 })();

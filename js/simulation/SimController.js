@@ -69,16 +69,26 @@
     start() {
       if (this.running) return;
       this.running = true;
-      const intervalMs = Math.round(1000 / TICK_RATE_HZ / this._speed);
-      this._interval = setInterval(() => this._tick(), intervalMs);
       JADO.log('Mission STARTED', 'info');
       this._emit('tick');
+      
+      const runTick = async () => {
+        if (!this.running) return;
+        await this._tick();
+        if (this.running) {
+          const intervalMs = Math.round(1000 / TICK_RATE_HZ / this._speed);
+          this._interval = setTimeout(runTick, intervalMs);
+        }
+      };
+      
+      const intervalMs = Math.round(1000 / TICK_RATE_HZ / this._speed);
+      this._interval = setTimeout(runTick, intervalMs);
     }
 
     pause() {
       if (!this.running) return;
       this.running = false;
-      clearInterval(this._interval);
+      clearTimeout(this._interval);
       this._interval = null;
       JADO.log('Simulation PAUSED', 'info');
     }
@@ -172,8 +182,8 @@
             } else {
               JADO.log(`⚠ Missile missed ${agent.id} (Pk=${(pk*100).toFixed(0)}%)`, 'warn');
             }
-            // Set cooldown
-            this._missileCD.set(cdKey, Math.floor(threat.spec.reloadTime / (100 / this._speed)));
+            // Set cooldown (decoupled from simulation speed multiplier)
+            this._missileCD.set(cdKey, Math.floor(threat.spec.reloadTime / (1000 / TICK_RATE_HZ)));
           }
         }
 
