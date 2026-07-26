@@ -1,10 +1,10 @@
-# ✈ JADO — Joint All-Domain Operations Constructive Simulation System
+# Automated Aviation Flight Path Planning System
 
 > **Fully offline** aircraft war simulation with 3D terrain rendering, A\* pathfinding, DQN reinforcement learning, and physics-based electronic warfare.
 
 ---
 
-## ⚡ Quick Start
+##  Quick Start
 
 ### First Time (internet required once)
 ```
@@ -19,11 +19,11 @@ Double-click  run.bat             ← 100% offline, no internet needed
 Open  index.html  in any browser
 ```
 
-> ✅ No Python. No Node. No installation. No internet after setup.
+>  No Python. No Node. No installation. No internet after setup.
 
 ---
 
-## 📸 System Overview
+## System Overview
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -47,7 +47,7 @@ Open  index.html  in any browser
 
 ---
 
-## 🎮 How to Run a Mission
+## How to Run a Mission
 
 | Step | Action |
 |------|--------|
@@ -72,11 +72,11 @@ Open  index.html  in any browser
 | EA-18G Growler | 490 m/s | 2.4 | **1.8 MW** | EW Support |
 | B-2A Spirit | 250 m/s | 0.00001 | — | Heavy Strike |
 
-> 💡 The **EA-18G Growler** activates its jammer during flight, reducing all nearby radar detection ranges.
+> The **EA-18G Growler** activates its jammer during flight, reducing all nearby radar detection ranges.
 
 ---
 
-## 🎯 Enemy Threats
+## Enemy Threats
 
 | System | Range | Base Pk% | Type |
 |--------|-------|----------|------|
@@ -94,9 +94,9 @@ The A\* planner always computes three simultaneous routes:
 
 | Corridor | Colour | Strategy |
 |----------|--------|----------|
-| **Fastest** | 🟢 Green | Shortest distance, avoids threats |
-| **Low-Alt** | 🟡 Yellow | Hugs terrain for radar masking |
-| **Balanced** | 🔵 Cyan | Speed + threat avoidance compromise |
+| **Fastest** | Green | Shortest distance, avoids threats |
+| **Low-Alt** | Yellow | Hugs terrain for radar masking |
+| **Balanced** | Cyan | Speed + threat avoidance compromise |
 
 Each agent is automatically assigned a corridor. Paths recompute instantly when you add obstacles or threats mid-mission.
 
@@ -147,7 +147,7 @@ Input (38) → Dense(128, ReLU) → Dense(64, ReLU) → Dense(32, ReLU) → Q-va
 
 ---
 
-## 📡 Electronic Warfare Model
+##  Electronic Warfare Model
 
 ### Radar Detection Range
 ```
@@ -175,7 +175,7 @@ Bresenham 3D ray marching through the voxel grid — terrain physically blocks r
 
 ---
 
-## 🌦 Environment Conditions
+##  Environment Conditions
 
 | Weather | Radar Range | Effect |
 |---------|-------------|--------|
@@ -197,7 +197,7 @@ Bresenham 3D ray marching through the voxel grid — terrain physically blocks r
 
 ---
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 AIRCRAFTsimulation/
@@ -245,7 +245,7 @@ AIRCRAFTsimulation/
 
 ---
 
-## 🏗 Architecture Notes
+## Architecture Notes
 
 ### Why TelemetryCache instead of Redis?
 The `TelemetryCache` class replicates the Redis API (`hmset`, `hgetall`, `keys(pattern)`, `subscribe`) as an in-memory JavaScript Map. This gives identical architectural separation between the simulation loop (writer) and the UI (reader) without requiring a Redis server binary.
@@ -258,7 +258,7 @@ Three.js gives OpenGL-class 3D rendering (WebGL) with zero OS dependencies, work
 
 ---
 
-## 🔧 Troubleshooting
+## Troubleshooting
 
 | Problem | Solution |
 |---------|----------|
@@ -272,9 +272,9 @@ Three.js gives OpenGL-class 3D rendering (WebGL) with zero OS dependencies, work
 
 ---
 
-## 📊 After-Action Report (AAR)
+## After-Action Report (AAR)
 
-Clicking **📥 Export AAR** downloads a JSON file containing:
+Clicking **Export AAR** downloads a JSON file containing:
 
 ```json
 {
@@ -309,7 +309,7 @@ Clicking **📥 Export AAR** downloads a JSON file containing:
 
 ---
 
-## 📌 Version
+##  Version
 
 | Component | Version |
 |-----------|---------|
